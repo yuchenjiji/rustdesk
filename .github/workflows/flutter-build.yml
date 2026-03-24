@@ -9,6 +9,17 @@ on:
       upload-tag:
         type: string
         default: "nightly"
+  # 允许手动触发
+  workflow_dispatch:
+    inputs:
+      upload-artifact:
+        description: '是否上传构建产物'
+        required: false
+        type: boolean
+      upload-tag:
+        description: '构建的 tag 名称'
+        required: false
+        type: string
 
 # NOTE: F-Droid builder script 'flutter/build_fdroid.sh' reads environment
 # variables from this workflow!
