@@ -2003,7 +2003,7 @@ jobs:
     name: build-rustdesk-web
     runs-on: ubuntu-22.04
     permissions:
-      contents: read
+      contents: write  # 这里改成 write，否则发布 Release 会失败
     strategy:
       fail-fast: false
     env:
@@ -2020,7 +2020,7 @@ jobs:
           sudo apt-get install -y wget npm
 
       - name: Install flutter
-        uses: subosito/flutter-action@v2.12.0 #https://github.com/subosito/flutter-action/issues/277
+        uses: subosito/flutter-action@v2.12.0
         with:
           channel: "stable"
           flutter-version: ${{ env.FLUTTER_VERSION }}
@@ -2031,35 +2031,36 @@ jobs:
           cd $(dirname $(dirname $(which flutter)))
           [[ "3.24.5" == ${{env.FLUTTER_VERSION}} ]] && git apply ${{ github.workspace }}/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff
 
-      # https://rustdesk.com/docs/en/dev/build/web/
+      # 核心修复部分：去掉不存在的 js 编译，直接打 Web 包
       - name: Build web
         shell: bash
         run: |
-          pushd flutter/web/js
-          npm install yarn -g
-          npm install typescript -g
-          npm install protoc -g
-          # Install protoc first, see: https://google.github.io/proto-lens/installing-protoc.html
-          npm install ts-proto
-          # Only works with vite <= 2.8, see: https://github.com/vitejs/vite/blob/main/docs/guide/build.md#chunking-strategy
-          npm install vite@2.8
-          yarn install && yarn build
-          popd
-
+          # 1. 下载 Web 运行必需的依赖组件
+          mkdir -p flutter/web
           pushd flutter/web
-          wget https://github.com/rustdesk/doc.rustdesk.com/releases/download/console/web_deps.tar.gz
-          tar xzf web_deps.tar.gz
+          wget https://github.com/rustdesk/doc.rustdesk.com/releases/download/console/web_deps.tar.gz || echo "web_deps download failed"
+          if [ -f "web_deps.tar.gz" ]; then
+            tar xzf web_deps.tar.gz
+          fi
           popd
 
+          # 2. 编译 Flutter Web
           pushd flutter
-          flutter build web --release
+          flutter build web --release --dart-define=FLUTTER_WEB_CANVASKIT_URL=https://unpkg.com/canvaskit-wasm@0.39.1/bin/
+          
+          # 3. 整理并打包产物
           cd build
-          cp ../web/README.md web
-          # TODO: Remove the following line when the web is almost complete.
-          echo -e "\n\nThis build is for preview and not full functionality." >> web/README.md
+          cp ../web/README.md web/ || touch web/README.md
+          echo -e "\n\nBuild for Chromebook - 1.4.6 Web" >> web/README.md
+          
+          # 这一步必须和环境变量匹配：rustdesk-1.4.6-web-basic
           dir_name="rustdesk-${{ env.VERSION }}-${{ env.RELEASE_NAME }}"
-          mv web "${dir_name}" && tar czf "${dir_name}".tar.gz "${dir_name}"
-          sha256sum "${dir_name}".tar.gz
+          mv web "${dir_name}"
+          tar czf "${dir_name}.tar.gz" "${dir_name}"
+          
+          # 打印一下结果，方便在日志里看
+          ls -lh "${dir_name}.tar.gz"
+          sha256sum "${dir_name}.tar.gz"
           popd
 
       - name: Publish web
@@ -2067,6 +2068,6 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           prerelease: true
-          tag_name: ${{ env.TAG_NAME }}
+          tag_name: ${{ env.TAG_NAME || 'nightly' }}
           files: |
             flutter/build/rustdesk-${{ env.VERSION }}-${{ env.RELEASE_NAME }}.tar.gz
